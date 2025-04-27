@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, File, UploadFile, Form
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal, Union
 import json
 import uuid
 import time
@@ -54,30 +54,45 @@ app = FastAPI(
 )
 
 # Create in-memory cache for requests
-question_cache = {}
+notes_question_cache = {}
+notes_question_cache = {}
+
+class SubtopicSummary(BaseModel):
+    Sub_topic: str = Field(
+        description="Subtitle or heading for a section within the PDF notes."
+    )
+    summary: str = Field(
+        description="Detailed notes or explanation under this subtitle."
+    )
+
+class PDFNotes(BaseModel):
+
+    Topic: List[SubtopicSummary] = Field(
+        description="List of notes organized by subtitles for the PDF."
+    )
 
 class MCQQuestion(BaseModel):
-    question: str = Field(
+    questionText: str = Field(
         description="The full text of the multiple choice question"
     )
-    optionA: str = Field(
+    option1: str = Field(
         description="First answer option (may or may not be correct)"
     )
-    optionB: str = Field(
+    option2: str = Field(
         description="Second answer option (may or may not be correct)"
     )
-    optionC: str = Field(
+    option3: str = Field(
         description="Third answer option (may or may not be correct)"
     )
-    optionD: str = Field(
+    option4: str = Field(
         description="Fourth answer option (may or may not be correct)"
     )
-    correct_options: List[str] = Field(
-        description="List of correct options (e.g., ['A'], ['B', 'D'] for multiple correct answers)"
+    correctOption: Literal["option1", "option2", "option3", "option4"] = Field(
+        description="The single correct option (option1, option2, option3, or option4)."
     )
 
 class QuestionBank(BaseModel):
-    mcq_questions: List[MCQQuestion] = Field(
+    mcqQuestions: List[MCQQuestion] = Field(
         description="List of multiple choice questions"
     )
 
@@ -141,7 +156,7 @@ class TaskStatus(BaseModel):
     status: str
     created_at: str
     completed_at: Optional[str] = None
-    result: Optional[QuestionBank] = None
+    result: Union[QuestionBank, PDFNotes] = None
     error: Optional[str] = None
 
 # In-memory conversation history cache
@@ -174,38 +189,38 @@ def generate_questions(topic: str, count: int, grade_level: str, temperature: fl
         
         # Create the prompt for the model
         prompt = f"""
-        Generate {count} multiple choice questions about {topic} for {grade_level} school students.
+    Generate {count} multiple choice questions about {topic} for {grade_level} school students.
 
-        REQUIREMENTS:
-        1. EVERY question MUST have exactly FOUR options labeled A, B, C, and D
-        2. EVERY question MUST include the correct_options field with the letter(s) of the correct answer(s)
-        3. The questions should be age-appropriate for {grade_level} school students
-        4. Format your response as JSON with the following structure:
+    REQUIREMENTS:
+    1. EVERY question MUST have exactly FOUR options labeled 'option1', 'option2', 'option3', and 'option4'.
+    2. EVERY question MUST have exactly ONE correct option, indicated in the 'correctOption' field with the corresponding label ('option1', 'option2', 'option3', or 'option4').
+    3. The questions should be age-appropriate for {grade_level} school students.
+    4. Format your response as JSON with the following structure:
 
+    {{
+      "mcqQuestions": [
         {{
-          "mcq_questions": [
-            {{
-              "question": "What is photosynthesis?",
-              "optionA": "A process where plants release oxygen",
-              "optionB": "A process where plants absorb water",
-              "optionC": "A process where plants make their own food using sunlight",
-              "optionD": "A process where plants grow taller",
-              "correct_options": ["C"]
-            }},
-            {{
-              "question": "Another question here?",
-              "optionA": "Option A",
-              "optionB": "Option B",
-              "optionC": "Option C",
-              "optionD": "Option D",
-              "correct_options": ["A"]
-            }}
-          ]
+          "questionText": "What is photosynthesis?",
+          "option1": "A process where plants release oxygen",
+          "option2": "A process where plants absorb water",
+          "option3": "A process where plants make their own food using sunlight",
+          "option4": "A process where plants grow taller",
+          "correctOption": "option3"
+        }},
+        {{
+          "questionText": "Another question here?",
+          "option1": "Option 1",
+          "option2": "Option 2",
+          "option3": "Option 3",
+          "option4": "Option 4",
+          "correctOption": "option1"
         }}
+      ]
+    }}
 
-        IMPORTANT: Include the correct_options field for EVERY question.
-        Return ONLY the JSON without any additional text or comments.
-        """
+    IMPORTANT: Include the 'correctOption' field for EVERY question with the single correct option label.
+    Return ONLY the JSON without any additional text or comments.
+    """
         
         # Get response
         response = llm.invoke(prompt)
@@ -221,26 +236,26 @@ def generate_questions(topic: str, count: int, grade_level: str, temperature: fl
             question_bank = QuestionBank(**data)
             
             # Update cache with success
-            question_cache[task_id]["status"] = "completed"
-            question_cache[task_id]["completed_at"] = datetime.now().isoformat()
-            question_cache[task_id]["result"] = question_bank
+            notes_question_cache[task_id]["status"] = "completed"
+            notes_question_cache[task_id]["completed_at"] = datetime.now().isoformat()
+            notes_question_cache[task_id]["result"] = question_bank
             
         except Exception as e:
             # Update cache with error
-            question_cache[task_id]["status"] = "failed"
-            question_cache[task_id]["completed_at"] = datetime.now().isoformat()
-            question_cache[task_id]["error"] = f"Error parsing response: {str(e)}"
+            notes_question_cache[task_id]["status"] = "failed"
+            notes_question_cache[task_id]["completed_at"] = datetime.now().isoformat()
+            notes_question_cache[task_id]["error"] = f"Error parsing response: {str(e)}"
             
     except GoogleAPIError as e:
         # Handle Google API-specific errors
-        question_cache[task_id]["status"] = "failed"
-        question_cache[task_id]["completed_at"] = datetime.now().isoformat()
-        question_cache[task_id]["error"] = f"Google API Error: {str(e)}"
+        notes_question_cache[task_id]["status"] = "failed"
+        notes_question_cache[task_id]["completed_at"] = datetime.now().isoformat()
+        notes_question_cache[task_id]["error"] = f"Google API Error: {str(e)}"
     except Exception as e:
         # Update cache with error
-        question_cache[task_id]["status"] = "failed"
-        question_cache[task_id]["completed_at"] = datetime.now().isoformat()
-        question_cache[task_id]["error"] = f"Error during generation: {str(e)}"
+        notes_question_cache[task_id]["status"] = "failed"
+        notes_question_cache[task_id]["completed_at"] = datetime.now().isoformat()
+        notes_question_cache[task_id]["error"] = f"Error during generation: {str(e)}"
 
 def extract_json_from_response(response):
     """Extract JSON content from the model response"""
@@ -276,43 +291,43 @@ def generate_questions_from_pdf(pdf_text: str, count: int, grade_level: str, tem
         text_limit = min(len(pdf_text), 9000)  # Limit text to 9000 chars
         
         prompt = f"""
-        Based on the following text content from a PDF, generate {count} multiple choice questions
-        appropriate for {grade_level} school students.
+    Based on the following text content from a PDF, generate {count} multiple choice questions
+    appropriate for {grade_level} school students.
 
-        PDF CONTENT:
-        {pdf_text[:text_limit]}
-        
-        REQUIREMENTS:
-        1. EVERY question MUST have exactly FOUR options labeled A, B, C, and D
-        2. EVERY question MUST include the correct_options field with the letter(s) of the correct answer(s)
-        3. The questions should be focused on the main concepts from the PDF content
-        4. There should be exactly {count} questions
-        5. Format your response as JSON with the following structure:
+    PDF CONTENT:
+    {pdf_text[:text_limit]}
 
+    REQUIREMENTS:
+    1. EVERY question MUST have exactly FOUR options labeled 'option1', 'option2', 'option3', and 'option4'.
+    2. EVERY question MUST have exactly ONE correct option, indicated in the 'correctOption' field with the corresponding label ('option1', 'option2', 'option3', or 'option4').
+    3. The questions should be focused on the main concepts from the PDF content.
+    4. There should be exactly {count} questions.
+    5. Format your response as JSON with the following structure:
+
+    {{
+      "mcqQuestions": [
         {{
-          "mcq_questions": [
-            {{
-              "question": "Question text from the PDF content?",
-              "optionA": "Option A",
-              "optionB": "Option B",
-              "optionC": "Option C",
-              "optionD": "Option D",
-              "correct_options": ["C"]
-            }},
-            {{
-              "question": "Another question from the PDF content?",
-              "optionA": "Option A",
-              "optionB": "Option B",
-              "optionC": "Option C",
-              "optionD": "Option D",
-              "correct_options": ["A"]
-            }}
-          ]
+          "questionText": "Question text from the PDF content?",
+          "option1": "Option 1",
+          "option2": "Option 2",
+          "option3": "Option 3",
+          "option4": "Option 4",
+          "correctOption": "option3"
+        }},
+        {{
+          "questionText": "Another question from the PDF content?",
+          "option1": "Option 1",
+          "option2": "Option 2",
+          "option3": "Option 3",
+          "option4": "Option 4",
+          "correctOption": "option1"
         }}
+      ]
+    }}
 
-        IMPORTANT: Include the correct_options field for EVERY question.
-        Return ONLY the JSON without any additional text or comments.
-        """
+    IMPORTANT: Include the 'correctOption' field for EVERY question with the single correct option label.
+    Return ONLY the JSON without any additional text or comments.
+    """
         
         # Get response
         response = llm.invoke(prompt)
@@ -327,26 +342,103 @@ def generate_questions_from_pdf(pdf_text: str, count: int, grade_level: str, tem
             question_bank = QuestionBank(**data)
             
             # Update cache with success
-            question_cache[task_id]["status"] = "completed"
-            question_cache[task_id]["completed_at"] = datetime.now().isoformat()
-            question_cache[task_id]["result"] = question_bank
+            notes_question_cache[task_id]["status"] = "completed"
+            notes_question_cache[task_id]["completed_at"] = datetime.now().isoformat()
+            notes_question_cache[task_id]["result"] = question_bank
             
         except Exception as e:
             # Update cache with error
-            question_cache[task_id]["status"] = "failed"
-            question_cache[task_id]["completed_at"] = datetime.now().isoformat()
-            question_cache[task_id]["error"] = f"Error parsing response: {str(e)}"
+            notes_question_cache[task_id]["status"] = "failed"
+            notes_question_cache[task_id]["completed_at"] = datetime.now().isoformat()
+            notes_question_cache[task_id]["error"] = f"Error parsing response: {str(e)}"
             
     except GoogleAPIError as e:
         # Handle Google API-specific errors
-        question_cache[task_id]["status"] = "failed"
-        question_cache[task_id]["completed_at"] = datetime.now().isoformat()
-        question_cache[task_id]["error"] = f"Google API Error: {str(e)}"
+        notes_question_cache[task_id]["status"] = "failed"
+        notes_question_cache[task_id]["completed_at"] = datetime.now().isoformat()
+        notes_question_cache[task_id]["error"] = f"Google API Error: {str(e)}"
     except Exception as e:
         # Update cache with error
-        question_cache[task_id]["status"] = "failed"
-        question_cache[task_id]["completed_at"] = datetime.now().isoformat()
-        question_cache[task_id]["error"] = f"Error during generation: {str(e)}"
+        notes_question_cache[task_id]["status"] = "failed"
+        notes_question_cache[task_id]["completed_at"] = datetime.now().isoformat()
+        notes_question_cache[task_id]["error"] = f"Error during generation: {str(e)}"
+
+def generate_notes_from_pdf(pdf_text: str, notes_type: Literal["Quick Notes", "Detailed Notes"], grade_level: str, temperature: float, task_id: str, model: str="gemini-1.5-pro-002"):
+    """Background task to generate questions from PDF content"""
+    try:
+        # Get model using the ModelManager instead of direct instantiation
+        llm = ModelManager.get_model(model_name=model, temperature=temperature)
+        
+        # Create the prompt for the model - limit text to prevent token overflow
+        text_limit = min(len(pdf_text), 10000)  # Limit text to 9000 chars
+        
+        prompt = f"""
+        Based on the following text content from a PDF, generate structured notes in the form of subtitles and detailed explanations.
+
+        Notes should be appropriate for {grade_level} school students and match the {notes_type} style:
+
+        1. Quick Notes: Short summaries under each subtitle.
+        2. Detailed Notes: Thorough explanations under each subtitle.
+
+        PDF CONTENT:
+        {pdf_text[:text_limit]}
+        
+        RREQUIREMENTS:
+
+        1. Organize the notes into multiple sections, each with a clear and concise subtitle.
+        2. Under each subtitle, write a content field that matches the {notes_type} (quick or detailed).
+        3. Cover the main ideas and important concepts from the PDF text.
+        4. Keep the notes easy to understand and suitable for {grade_level} school students.
+
+        Output Format:
+        Format your response as JSON with the following structure:
+
+        {{
+        "Topic": [
+            {{
+            "Sub_topic": "<Subtitle for a topic/section>",
+            "summary": "<Explanation or summary based on the notes_type>"
+            }},
+            ...
+        ]
+        }}
+
+        IMPORTANT: Return ONLY the JSON without any additional text or comments.
+        """
+        
+        # Get response
+        response = llm.invoke(prompt)
+        
+        try:
+            # Extract JSON content from the model response
+            json_content = extract_json_from_response(response.content)
+            
+            # Parse the JSON
+            data = json.loads(json_content)
+            notes_bank = PDFNotes(**data)  # Assuming you have NotesBank class (similar to QuestionBank)
+            
+            # Update cache with success
+            notes_question_cache[task_id]["status"] = "completed"
+            notes_question_cache[task_id]["completed_at"] = datetime.now().isoformat()
+            notes_question_cache[task_id]["result"] = notes_bank
+            
+        except Exception as e:
+            # Update cache with parsing error
+            notes_question_cache[task_id]["status"] = "failed"
+            notes_question_cache[task_id]["completed_at"] = datetime.now().isoformat()
+            notes_question_cache[task_id]["error"] = f"Error parsing response: {str(e)}"
+            
+    except GoogleAPIError as e:
+        # Handle Google API-specific errors
+        notes_question_cache[task_id]["status"] = "failed"
+        notes_question_cache[task_id]["completed_at"] = datetime.now().isoformat()
+        notes_question_cache[task_id]["error"] = f"Google API Error: {str(e)}"
+        
+    except Exception as e:
+        # Update cache with other errors
+        notes_question_cache[task_id]["status"] = "failed"
+        notes_question_cache[task_id]["completed_at"] = datetime.now().isoformat()
+        notes_question_cache[task_id]["error"] = f"Error during generation: {str(e)}"
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
@@ -402,7 +494,7 @@ async def create_questions(request: GenerationRequest, background_tasks: Backgro
     task_id = str(uuid.uuid4())
     
     # Add task to cache
-    question_cache[task_id] = {
+    notes_question_cache[task_id] = {
         "task_id": task_id,
         "status": "in_progress",
         "created_at": datetime.now().isoformat(),
@@ -442,7 +534,7 @@ async def create_questions_from_pdf(
     task_id = str(uuid.uuid4())
     
     # Add task to cache
-    question_cache[task_id] = {
+    notes_question_cache[task_id] = {
         "task_id": task_id,
         "status": "in_progress",
         "created_at": datetime.now().isoformat(),
@@ -489,9 +581,80 @@ async def create_questions_from_pdf(
         
     except Exception as e:
         # Update cache with error
-        question_cache[task_id]["status"] = "failed"
-        question_cache[task_id]["completed_at"] = datetime.now().isoformat()
-        question_cache[task_id]["error"] = f"Error processing PDF file: {str(e)}"
+        notes_question_cache[task_id]["status"] = "failed"
+        notes_question_cache[task_id]["completed_at"] = datetime.now().isoformat()
+        notes_question_cache[task_id]["error"] = f"Error processing PDF file: {str(e)}"
+        
+        return {
+            "task_id": task_id,
+            "status": "failed",
+            "message": f"Error processing PDF file: {str(e)}"
+        }
+    
+@app.post("/generate-notes-from-pdf", response_model=TaskResponse)
+async def create_notes_from_pdf(
+    background_tasks: BackgroundTasks,
+    pdf_file: UploadFile = File(...),
+    notes_type: str = Form("Quick Notes"),
+    grade_level: str = Form("elementary"),
+    temperature: float = Form(0.2),
+    model: str = Form("gemini-1.5-pro-002")
+):
+    """Generate multiple choice questions from a PDF file"""
+    # Create a task ID
+    task_id = str(uuid.uuid4())
+    
+    # Add task to cache
+    notes_question_cache[task_id] = {
+        "task_id": task_id,
+        "status": "in_progress",
+        "created_at": datetime.now().isoformat(),
+        "completed_at": None,
+        "result": None,
+        "error": None,
+        "pdf_filename": pdf_file.filename
+    }
+    
+    try:
+        # Create a temporary directory if it doesn't exist
+        os.makedirs("temp", exist_ok=True)
+        
+        # Save the uploaded PDF temporarily
+        pdf_path = f"temp/{task_id}_{pdf_file.filename}"
+        with open(pdf_path, "wb") as file:
+            shutil.copyfileobj(pdf_file.file, file)
+        
+        # Extract text from PDF using PyMuPDF
+        pdf_text = extract_text_from_pdf(pdf_path)
+        
+        # Delete the temporary PDF file
+        os.remove(pdf_path)
+        
+        if not pdf_text.strip():
+            raise Exception("Could not extract text from the PDF file please try with another pdf")
+        
+        # Start background task for processing
+        background_tasks.add_task(
+            generate_notes_from_pdf,
+            pdf_text,
+            notes_type,
+            grade_level,
+            temperature,
+            task_id,
+            model
+        )
+        
+        return {
+            "task_id": task_id,
+            "status": "in_progress",
+            "message": f"Generation of {notes_type} from PDF '{pdf_file.filename}' started"
+        }
+        
+    except Exception as e:
+        # Update cache with error
+        notes_question_cache[task_id]["status"] = "failed"
+        notes_question_cache[task_id]["completed_at"] = datetime.now().isoformat()
+        notes_question_cache[task_id]["error"] = f"Error processing PDF file: {str(e)}"
         
         return {
             "task_id": task_id,
@@ -502,18 +665,18 @@ async def create_questions_from_pdf(
 @app.get("/tasks/{task_id}", response_model=TaskStatus)
 async def get_task_status(task_id: str):
     """Get status of a question generation task"""
-    if task_id not in question_cache:
+    if task_id not in notes_question_cache:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    return question_cache[task_id]
+    return notes_question_cache[task_id]
 
-@app.get("/questions/{task_id}", response_model=QuestionBank)
+@app.get("/questions/{task_id}", response_model=Union[QuestionBank, PDFNotes])
 async def get_questions(task_id: str):
     """Get generated questions for a completed task"""
-    if task_id not in question_cache:
+    if task_id not in notes_question_cache:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    task = question_cache[task_id]
+    task = notes_question_cache[task_id]
     
     if task["status"] != "completed":
         raise HTTPException(
@@ -543,7 +706,8 @@ async def root():
             {"path": "/chat", "method": "POST", "description": "Chat with the LLM model"},
             {"path": "/tasks/{task_id}", "method": "GET", "description": "Check task status"},
             {"path": "/questions/{task_id}", "method": "GET", "description": "Get generated questions"},
-            {"path": "/chat/{conversation_id}", "method": "GET", "description": "Get chat conversation history"}
+            {"path": "/chat/{conversation_id}", "method": "GET", "description": "Get chat conversation history"},
+            {"path": "/generate-notes-from-pdf", "method": "POST", "description": "Generate notes from PDF content"}
         ]
     }
 
