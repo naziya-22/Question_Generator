@@ -3,3 +3,6 @@ langchain_community
 uvicorn
 pydantic
 pymupdf
+python-multipart
+langchain-google-genai
+google-genai
