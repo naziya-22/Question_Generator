@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, File, UploadFile, Form
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Literal, Union
@@ -27,7 +28,7 @@ class ModelManager:
     Class to manage Google Generative AI models used by the application
     """
     @staticmethod
-    def get_model(model_name: str = "gemini-1.5-pro-002", temperature: float = 0.2):
+    def get_model(model_name: str = "gemini-2.0-flash", temperature: float = 0.2):
         """Create and return a Google Generative AI model instance with the specified parameters"""
         # Set the model to output structured data for MCQ generation
         return ChatGoogleGenerativeAI(
@@ -38,7 +39,7 @@ class ModelManager:
         )
 
     @staticmethod
-    def get_chat_model(model_name: str = "gemini-1.5-pro-002", temperature: float = 0.7):
+    def get_chat_model(model_name: str = "gemini-2.0-flash", temperature: float = 0.7):
         """Create and return a Google Generative AI model instance configured for chat"""
         return ChatGoogleGenerativeAI(
             model=model_name,
@@ -51,6 +52,21 @@ app = FastAPI(
     title="MCQ Question Generator API",
     description="API that generates multiple choice questions using Google's Generative AI, with chat and PDF features",
     version="1.1.0"
+)
+
+origins = [
+    "http://localhost.tiangolo.com",
+    "https://localhost.tiangolo.com",
+    "http://localhost",
+    "http://localhost:8080",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Create in-memory cache for requests
@@ -118,7 +134,7 @@ class GenerationRequest(BaseModel):
         description="Temperature for model generation (0.0-1.0)"
     )
     model: str = Field(
-        default="gemini-1.5-pro-002",
+        default="gemini-2.0-flash",
         description="Google Generative AI model to use"
     )
 
@@ -131,7 +147,7 @@ class ChatRequest(BaseModel):
         description="Conversation ID to continue an existing conversation"
     )
     model: str = Field(
-        default="gemini-1.5-pro-002",
+        default="gemini-2.0-flash",
         description="Google Generative AI model to use"
     )
     temperature: float = Field(
@@ -156,7 +172,7 @@ class TaskStatus(BaseModel):
     status: str
     created_at: str
     completed_at: Optional[str] = None
-    result: Union[QuestionBank, PDFNotes] = None
+    result: Optional[Union[QuestionBank, PDFNotes]] = None
     error: Optional[str] = None
 
 # In-memory conversation history cache
@@ -181,7 +197,7 @@ def extract_text_from_pdf(pdf_path):
     except Exception as e:
         raise Exception(f"Error extracting text from PDF: {str(e)}")
 
-def generate_questions(topic: str, count: int, grade_level: str, temperature: float, task_id: str, model: str="gemini-1.5-pro-002"):
+def generate_questions(topic: str, count: int, grade_level: str, temperature: float, task_id: str, model: str="gemini-2.0-flash"):
     """Background task to generate questions"""
     try:
         # Get model using the ModelManager instead of direct instantiation
@@ -209,10 +225,10 @@ def generate_questions(topic: str, count: int, grade_level: str, temperature: fl
         }},
         {{
           "questionText": "Another question here?",
-          "option1": "Option 1",
-          "option2": "Option 2",
-          "option3": "Option 3",
-          "option4": "Option 4",
+          "option1": "Option A",
+          "option2": "Option B",
+          "option3": "Option C",
+          "option4": "Option D",
           "correctOption": "option1"
         }}
       ]
@@ -281,7 +297,7 @@ def extract_json_from_response(response):
         # If we're here, none of the matches were valid JSON
         raise ValueError("Could not extract valid JSON from the response")
 
-def generate_questions_from_pdf(pdf_text: str, count: int, grade_level: str, temperature: float, task_id: str, model: str="gemini-1.5-pro-002"):
+def generate_questions_from_pdf(pdf_text: str, count: int, grade_level: str, temperature: float, task_id: str, model: str="gemini-2.0-flash"):
     """Background task to generate questions from PDF content"""
     try:
         # Get model using the ModelManager instead of direct instantiation
@@ -308,18 +324,18 @@ def generate_questions_from_pdf(pdf_text: str, count: int, grade_level: str, tem
       "mcqQuestions": [
         {{
           "questionText": "Question text from the PDF content?",
-          "option1": "Option 1",
-          "option2": "Option 2",
-          "option3": "Option 3",
-          "option4": "Option 4",
+          "option1": "Option A",
+          "option2": "Option B",
+          "option3": "Option C",
+          "option4": "Option D",
           "correctOption": "option3"
         }},
         {{
           "questionText": "Another question from the PDF content?",
-          "option1": "Option 1",
-          "option2": "Option 2",
-          "option3": "Option 3",
-          "option4": "Option 4",
+          "option1": "Option E",
+          "option2": "Option F",
+          "option3": "Option G",
+          "option4": "Option H",
           "correctOption": "option1"
         }}
       ]
@@ -363,7 +379,7 @@ def generate_questions_from_pdf(pdf_text: str, count: int, grade_level: str, tem
         notes_question_cache[task_id]["completed_at"] = datetime.now().isoformat()
         notes_question_cache[task_id]["error"] = f"Error during generation: {str(e)}"
 
-def generate_notes_from_pdf(pdf_text: str, notes_type: Literal["Quick Notes", "Detailed Notes"], grade_level: str, temperature: float, task_id: str, model: str="gemini-1.5-pro-002"):
+def generate_notes_from_pdf(pdf_text: str, notes_type: Literal["Quick Notes", "Detailed Notes"], grade_level: str, temperature: float, task_id: str, model: str="gemini-2.0-flash"):
     """Background task to generate questions from PDF content"""
     try:
         # Get model using the ModelManager instead of direct instantiation
@@ -396,19 +412,23 @@ def generate_notes_from_pdf(pdf_text: str, notes_type: Literal["Quick Notes", "D
         {{
         "Topic": [
             {{
-            "Sub_topic": "<Subtitle for a topic/section>",
-            "summary": "<Explanation or summary based on the notes_type>"
+            "Sub_topic": "Subtitle for a topic/section",
+            "summary": "Explanation or summary based on the notes_type for topic 1"
+            }},
+            {{
+            "Sub_topic": "Subtitle for a topic2/section2",
+            "summary": "Explanation or summary based on the notes_type for topic 2"
             }},
             ...
         ]
         }}
 
-        IMPORTANT: Return ONLY the JSON without any additional text or comments.
+        IMPORTANT: Return ONLY the JSON without any additional text or comments. the json should start as {{"Topic":[...]}} You don't have to decide on the Topic just return Topic it is a key.
         """
         
         # Get response
         response = llm.invoke(prompt)
-        
+        print(response)
         try:
             # Extract JSON content from the model response
             json_content = extract_json_from_response(response.content)
@@ -527,7 +547,7 @@ async def create_questions_from_pdf(
     count: int = Form(5),
     grade_level: str = Form("elementary"),
     temperature: float = Form(0.2),
-    model: str = Form("gemini-1.5-pro-002")
+    model: str = Form("gemini-2.0-flash")
 ):
     """Generate multiple choice questions from a PDF file"""
     # Create a task ID
@@ -598,7 +618,7 @@ async def create_notes_from_pdf(
     notes_type: str = Form("Quick Notes"),
     grade_level: str = Form("elementary"),
     temperature: float = Form(0.2),
-    model: str = Form("gemini-1.5-pro-002")
+    model: str = Form("gemini-2.0-flash")
 ):
     """Generate multiple choice questions from a PDF file"""
     # Create a task ID
